@@ -33,7 +33,19 @@ RUN cat > /start.sh << 'EOF'
 set -e
 
 echo "Railway PORT: $PORT"
-echo "DB_HOST: $DB_HOST"
+echo "PGHOST: $PGHOST"
+echo "REDIS_HOST: $REDIS_HOST"
+
+# Build zou's DB_URI from Railway's Postgres reference variables
+export DB_URI="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+# Map Railway's Redis reference variables to zou's expected env vars
+export KV_STORE_HOST="${REDIS_HOST:-localhost}"
+export KV_STORE_PORT="${REDIS_PORT:-6379}"
+
+echo "DB_URI (host only): postgresql://${PGUSER}:***@${PGHOST}:${PGPORT}/${PGDATABASE}"
+echo "KV_STORE_HOST: $KV_STORE_HOST"
+echo "KV_STORE_PORT: $KV_STORE_PORT"
 
 # Initialize database
 /opt/zou/zouenv/bin/zou init-db || true
