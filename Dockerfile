@@ -5,8 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     software-properties-common build-essential \
-    postgresql-client postgresql-server-dev-all \
-    redis-tools nginx xmlsec1 ffmpeg curl jq \
+    postgresql-client redis-tools nginx xmlsec1 ffmpeg curl jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12
