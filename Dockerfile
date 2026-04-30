@@ -22,8 +22,9 @@ RUN useradd --home /opt/zou zou \
 # Install Zou and Gunicorn
 RUN python3.12 -m venv /opt/zou/zouenv \
     && /opt/zou/zouenv/bin/pip install --upgrade pip \
-    && /opt/zou/zouenv/bin/pip install zou gunicorn[gevent] gevent-websocket
-
+    && /opt/zou/zouenv/bin/pip install zou gunicorn[gevent] gevent-websocket \
+    && /opt/zou/zouenv/bin/pip install flask-sqlalchemy flask-mail
+    
 ENV PATH="/opt/zou/zouenv/bin:/usr/bin:$PATH"
 
 # Create startup script
