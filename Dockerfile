@@ -3,29 +3,93 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies
-RUN apt-get update && apt-get install -y \
-    software-properties-common build-essential \
-    postgresql-client redis-tools nginx xmlsec1 ffmpeg curl jq \
+RUN apt-get update && apt-get install -y \\
+    software-properties-common build-essential \\
+    postgresql-client postgresql-server-dev-all \\
+    redis-tools nginx xmlsec1 ffmpeg curl jq \\
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python 3.12
-RUN add-apt-repository ppa:deadsnakes/ppa -y \
-    && apt-get update \
-    && apt-get install -y python3.12 python3.12-venv python3.12-dev \
+RUN add-apt-repository ppa:deadsnakes/ppa -y \\
+    && apt-get update \\
+    && apt-get install -y python3.12 python3.12-venv python3.12-dev \\
     && rm -rf /var/lib/apt/lists/*
 
 # Create zou user and directories
-RUN useradd --home /opt/zou zou \
-    && mkdir -p /opt/zou/backups /opt/zou/previews /opt/zou/tmp /opt/zou/logs \
+RUN useradd --home /opt/zou zou \\
+    && mkdir -p /opt/zou/backups /opt/zou/previews /opt/zou/tmp /opt/zou/logs \\
     && chown -R zou:zou /opt/zou
 
 # Install Zou and Gunicorn
-RUN python3.12 -m venv /opt/zou/zouenv \
-    && /opt/zou/zouenv/bin/pip install --upgrade pip \
-    && /opt/zou/zouenv/bin/pip install zou gunicorn[gevent] gevent-websocket \
-    && /opt/zou/zouenv/bin/pip install flask-sqlalchemy flask-mail
+RUN python3.12 -m venv /opt/zou/zouenv \\
+    && /opt/zou/zouenv/bin/pip install --upgrade pip \\
+    && /opt/zou/zouenv/bin/pip install zou gunicorn[gevent] gevent-websocket
 
 ENV PATH="/opt/zou/zouenv/bin:/usr/bin:$PATH"
+
+# Create startup script
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=========================================="
+echo "Railway PORT: $PORT"
+echo "DATABASE_URL: ${DATABASE_URL:-not set}"
+echo "PGHOST: ${PGHOST:-not set}"
+echo "PGPORT: ${PGPORT:-not set}"
+echo "=========================================="
+
+# Export standard PostgreSQL variables for Zou
+if [ -n "$DATABASE_URL" ]; then
+    echo "Using DATABASE_URL for database connection"
+    export DB_HOST=""
+    export DB_PORT=""
+    export DB_USERNAME=""
+    export DB_PASSWORD=""
+    export DB_DATABASE=""
+elif [ -n "$PGHOST" ]; then
+    echo "Using PG* variables for database connection"
+    export DB_HOST="$PGHOST"
+    export DB_PORT="${PGPORT:-5432}"
+    export DB_USERNAME="$PGUSER"
+    export DB_PASSWORD="$PGPASSWORD"
+    export DB_DATABASE="$PGDATABASE"
+fi
+
+# Initialize database (with retry)
+echo "Initializing database..."
+/opt/zou/zouenv/bin/zou init-db || echo "Database init failed or already exists"
+/opt/zou/zouenv/bin/zou init-data || echo "Data init failed or already exists"
+
+# Create default admin user
+echo "Creating admin user..."
+/opt/zou/zouenv/bin/zou create-admin --password mysecretpassword admin@example.com || echo "Admin user may already exist"
+
+# Start Gunicorn on Railway's PORT
+echo "Starting Gunicorn on port $PORT..."
+exec /opt/zou/zouenv/bin/gunicorn \\
+    -w 3 \\
+    -k gevent \\
+    -b 0.0.0.0:$PORT \\
+    --access-logfile - \\
+    --error-logfile - \\
+    zou.app:app
+EOF
+
+RUN chmod +x /start.sh
+
+EXPOSE $PORT
+CMD ["/start.sh"]
+'''
+
+with open('/mnt/agents/output/Dockerfile', 'w') as f:
+    f.write(dockerfile_content)
+
+print("Updated zou-api Dockerfile created!")
+print("\nKey changes:")
+print("- Better logging for debugging")
+print("- Handles both DATABASE_URL and PG* variables")
+print("- Added error handling for init commands")
 
 # Pre-create the config directory so the startup script can write into it.
 RUN mkdir -p /etc/zou
