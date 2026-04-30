@@ -36,22 +36,70 @@ echo "Railway PORT: $PORT"
 echo "PGHOST: $PGHOST"
 echo "REDIS_HOST: $REDIS_HOST"
 
-# Build zou's DB_URI from Railway's Postgres reference variables
-export DB_URI="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+# Validate required env vars
+: "${PGHOST:?PGHOST is required}"
+: "${PGPORT:?PGPORT is required}"
+: "${PGUSER:?PGUSER is required}"
+: "${PGPASSWORD:?PGPASSWORD is required}"
+: "${PGDATABASE:?PGDATABASE is required}"
+: "${REDIS_HOST:?REDIS_HOST is required}"
+: "${PORT:?PORT is required}"
 
-# Map Railway's Redis reference variables to zou's expected env vars
-export KV_STORE_HOST="${REDIS_HOST:-localhost}"
-export KV_STORE_PORT="${REDIS_PORT:-6379}"
+# Write zou's config.py at runtime so it picks up Railway's env vars.
+# Zou loads this file via the APP_SETTINGS env var (Flask config from envvar).
+# This is the authoritative way to configure zou — env vars alone are not
+# read by zou's default config loader; a Python config file is required.
+mkdir -p /etc/zou
+cat > /etc/zou/config.py << ZOUCFG
+# Auto-generated at container startup from Railway environment variables.
+import os
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "$(openssl rand -hex 32)")
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "$(openssl rand -hex 32)")
+
+# PostgreSQL — built from Railway's Postgres reference variables
+DB_URI = "postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+# Redis — built from Railway's Redis reference variables
+KV_STORE_BACKEND = "redis"
+KV_STORE_HOST = "${REDIS_HOST}"
+KV_STORE_PORT = ${REDIS_PORT:-6379}
+
+# File storage paths
+PREVIEW_FOLDER = "/opt/zou/previews"
+TMP_FOLDER = "/opt/zou/tmp"
+LOGS_FOLDER = "/opt/zou/logs"
+BACKUP_FOLDER = "/opt/zou/backups"
+ZOUCFG
+
+export APP_SETTINGS="/etc/zou/config.py"
 
 echo "DB_URI (host only): postgresql://${PGUSER}:***@${PGHOST}:${PGPORT}/${PGDATABASE}"
-echo "KV_STORE_HOST: $KV_STORE_HOST"
-echo "KV_STORE_PORT: $KV_STORE_PORT"
+echo "KV_STORE_HOST: ${REDIS_HOST}"
+echo "KV_STORE_PORT: ${REDIS_PORT:-6379}"
+echo "APP_SETTINGS: $APP_SETTINGS"
 
-# Initialize database
+# Wait for Postgres to be ready before running migrations
+echo "Waiting for Postgres at ${PGHOST}:${PGPORT}..."
+until pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -q; do
+    echo "  Postgres not ready yet, retrying in 2s..."
+    sleep 2
+done
+echo "Postgres is ready."
+
+# Wait for Redis to be ready
+echo "Waiting for Redis at ${REDIS_HOST}:${REDIS_PORT:-6379}..."
+until redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT:-6379}" ping | grep -q PONG; do
+    echo "  Redis not ready yet, retrying in 2s..."
+    sleep 2
+done
+echo "Redis is ready."
+
+# Initialize database schema and seed data
 /opt/zou/zouenv/bin/zou init-db || true
 /opt/zou/zouenv/bin/zou init-data || true
 
-# Create default admin user
+# Create default admin user (no-op if already exists)
 /opt/zou/zouenv/bin/zou create-admin --password mysecretpassword admin@example.com || true
 
 # Start Gunicorn on Railway's PORT
