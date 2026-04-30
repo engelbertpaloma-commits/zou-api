@@ -87,14 +87,6 @@ until pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -q; do
 done
 echo "Postgres is ready."
 
-# Wait for Redis to be ready
-echo "Waiting for Redis at ${REDIS_HOST}:${REDIS_PORT:-6379}..."
-until redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT:-6379}" ping | grep -q PONG; do
-    echo "  Redis not ready yet, retrying in 2s..."
-    sleep 2
-done
-echo "Redis is ready."
-
 # Initialize database schema and seed data
 /opt/zou/zouenv/bin/zou init-db || true
 /opt/zou/zouenv/bin/zou init-data || true
